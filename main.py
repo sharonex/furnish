@@ -4,16 +4,23 @@ import cv2
 import numpy as np
 from typing import List
 import glob
+import torch
 
+device = torch.device("mps")
 # Load a model
-pred_model = YOLO("/Users/nadaveidelstein/Downloads/yolo11n.pt")
-embed_model = YOLO("/Users/nadaveidelstein/Downloads/yolo11s-cls.pt")
+pred_model = YOLO("/Users/nadaveidelstein/Downloads/yolo11n.pt").to(device)
+# embed_model = YOLO("/Users/nadaveidelstein/Downloads/yolo11s-cls.pt")
+
+embed_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14').to(device)
 
 # pred_model.compile()
 # embed_model.compile()
 
 def norm(feats):
     return feats / np.linalg.norm(feats)
+
+# def norm(feats):
+    # return (feats / torch.norm(feats)).cpu().numpy()
     # return feats
 
 def bboxes(image):
@@ -29,8 +36,13 @@ def bboxes(image):
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 crop = image[y1:y2, x1:x2]
                 # resize so it's 320x320 with padding
-                crop = cv2.resize(crop, (320, 320), interpolation=cv2.INTER_AREA)
-                feats = embed_model.embed(crop)[0]
+                crop = cv2.resize(crop, (336, 336), interpolation=cv2.INTER_AREA)
+                # Convert crop to tensor and add batch dimension
+                crop_tensor = torch.from_numpy(crop).permute(2, 0, 1).float() / 255.0
+                crop_tensor = crop_tensor.unsqueeze(0).to(device)
+
+                with torch.no_grad():
+                    feats = embed_model(crop_tensor)[0].cpu().numpy()
                 yield crop, norm(feats)
 
     return len(results.boxes or []), gen
@@ -68,7 +80,7 @@ def lookup_image(image_path, feats, crops):
 
 def main():
     # db_paths = ["/Users/nadaveidelstein/Downloads/4750.jpg"]
-    db_paths = glob.glob("/Users/nadaveidelstein/Downloads/IKEADataset/**/*.jpg", recursive=True)[:1500]
+    db_paths = glob.glob("/Users/nadaveidelstein/Downloads/IKEADataset_bedroom/**/*.jpg", recursive=True)[:1500]
     print(f"Building database with {len(db_paths)} images")
 
     build_db(db_paths)
